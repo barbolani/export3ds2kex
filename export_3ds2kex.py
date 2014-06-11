@@ -46,76 +46,99 @@ from the lib3ds project (http://lib3ds.sourceforge.net/) sourcecode.
 # ***** END GPL LICENCE BLOCK *****
 # --------------------------------------------------------------------------
 
+######################################################
+# Add-on definition
+######################################################
+
+bl_info = {
+    "name": "Export to KEX (RealFlight) file format",
+    "author": ["Campbell Barton", "Bob Holcomb", "Richard Lärkäng", "Damien McGinnes", "Mark Stijnman","Alfonso Garcia Patino"],
+    "version": (1, 0),
+    "blender": (2, 7, 0),
+    "location": "File -> Export -> Export to KEX file",
+    "description": "Exports selection in a format readable for the RealFlight program",
+    "warning": "",
+    "wiki_url": "",
+    "tracker_url": "",
+    "category": "Import-Export"}
+
 
 ######################################################
 # Importing modules
 ######################################################
 
 import math
-import Blender
+import time
+# import Blender
 import bpy
-import BPyMesh
-import BPyObject
-from BPyMesh import getMeshFromObject
-from BPyObject import getDerivedObjects
-from Blender import Registry
+# import bpy.mesh
+# import bpy.object
+# from BPyMesh import getMeshFromObject
+# from BPyObject import getDerivedObjects
+# from Blender import Registry
 import struct
+import sys
 import os
+
+from bpy.types import Operator, AddonPreferences
+from bpy.props import StringProperty, BoolProperty
 
 # Properties controls
 CS_GLOBALOPTIONS = {}
 CS_GLOBALOPTIONS_OBJ = None
 
-# Registry variables
-KEX_FILE = ''
-ENABLE_KEX = False
-ENABLE_SUP = True
-ENABLE_BETA = False
+class OBJECT_OT_kex_export(Operator,AddonPreferences):
+    """KEX export class"""
+    bl_idname = 'object.kex_export'
+    bl_label = '3DS to KEX export'
+    bl_options = {'REGISTER','UNDO'}
 
-def registry_update():
-	global KEX_FILE
-	global ENABLE_KEX
-	global ENABLE_SUP
-	global ENABLE_BETA
+    kexfile = StringProperty(
+        name='Location of 3DS2KEX.exe utility',
+		subtype='FILE_PATH',
+    	)
+    enablekex = BoolProperty(
+		name='Enable creation of KEX by calling 3DS2KEX utility',
+		default=False,
+		)
+    enablesup = BoolProperty(
+		name='Enable creation of custom SUP file for pivot and NUP parameters.',
+		default=False,
+		)
+    enablebeta = BoolProperty(
+		name='Enable beta 3ds2kex utility features (Dec 2007 Beta release from Knife Edge)',
+		default=False,
+		)
 
-	d = {
-		'KEX_FILE': KEX_FILE,
-		'ENABLE_KEX': ENABLE_KEX,
-		'ENABLE_SUP': ENABLE_SUP,
-		'ENABLE_BETA': ENABLE_BETA,
-		'script': 'export_3ds2kex.py',
-		'tooltips': {
-			'KEX_FILE': 'Location of 3DS2KEX.exe utility.',
-			'ENABLE_KEX': 'Enable creation of KEX by calling 3DS2KEX utility.',
-			'ENABLE_SUP': 'Enable creation of custom SUP file for pivot and NUP parameters.',
-			'ENABLE_BETA': 'Enable beta 3ds2kex utility features (Dec 2007 Beta release from Knife Edge)',
-		},
-	}
+    def draw(self, context):
+        layout = self.layout
+        layout.label(text="Preferences for KEX file export")
+        layout.prop(self, "kexfile")
+        layout.prop(self, "enablekex")
+        layout.prop(self, "enablesup")
+        layout.prop(self, "enablebeta")
 
-	Registry.SetKey('export_3ds2kex', d, True)
+    filepath = StringProperty(subtype="FILE_PATH")
 
-def registry_import():
-	global KEX_FILE
-	global ENABLE_KEX
-	global ENABLE_SUP
-	global ENABLE_BETA
+    def invoke(self,context,event):
+        context.window_manager.fileselect_add(self)
+        return {'RUNNING_MODAL'}    
 
-	d = Registry.GetKey('export_3ds2kex', True)
+    def execute(self, context):
+        save_3ds(self, self.filename)
+        return {'FINISHED'}
 
-	if d:
-		try:
-			KEX_FILE = d['KEX_FILE']
-			ENABLE_KEX = d['ENABLE_KEX']
-			ENABLE_SUP = d['ENABLE_SUP']
-		except:
-			registry_update()
-		try:
-			ENABLE_BETA = d['ENABLE_BETA']
-		except:
-			registry_update()
-	else:
-		registry_update()
+def menu_func(self, context):
+	self.layout.operator_context = 'INVOKE_DEFAULT'
+	self.layout.operator(OBJECT_OT_kex_export.bl_idname, text="Export to KEX file")
+		
+def register():
+    bpy.utils.register_class(OBJECT_OT_kex_export)
+    bpy.types.INFO_MT_file_export.append(menu_func)
 
+def unregister():		
+    bpy.types.INFO_MT_file_export.remove(menu_func)
+    bpy.utils.unregister_class(OBJECT_OT_kex_export)
 
 # So 3ds max can open files, limit names to 12 in length
 # this is verry annoying for filenames!
@@ -131,7 +154,7 @@ def sane_name(name, nameBucket, isFilename):
 		return name_fixed
 
 	if (isFilename) and (len(name) > 12):
-                print 'Warning: Filenames must be less than 12 characters (\'' + name + '\')'
+		print('Warning: Filenames must be less than 12 characters (\'' + name + '\')')
 		new_name = name[:12]
 	else:
 		new_name = name
@@ -155,63 +178,63 @@ def sane_name(name, nameBucket, isFilename):
 
 #Some of the chunks that we will export
 #----- Primary Chunk, at the beginning of each file
-PRIMARY= long("0x4D4D",16)
+PRIMARY = int("0x4D4D",16)
 
 #------ Main Chunks
-OBJECTINFO   =      long("0x3D3D",16);      #This gives the version of the mesh and is found right before the material and object information
-VERSION      =      long("0x0002",16);      #This gives the version of the .3ds file
-KFDATA       =      long("0xB000",16);      #This is the header for all of the key frame info
+OBJECTINFO   =      int("0x3D3D",16);      #This gives the version of the mesh and is found right before the material and object information
+VERSION      =      int("0x0002",16);      #This gives the version of the .3ds file
+KFDATA       =      int("0xB000",16);      #This is the header for all of the key frame info
 
 #------ sub defines of OBJECTINFO
 MATERIAL     =      45055		#0xAFFF				// This stored the texture info
 OBJECT       =      16384		#0x4000				// This stores the faces, vertices, etc...
 
 #>------ sub defines of MATERIAL
-MATNAME      =      long("0xA000",16);      # This holds the material name
-MATAMBIENT   =      long("0xA010",16);      # Ambient color of the object/material
-MATDIFFUSE   =      long("0xA020",16);      # This holds the color of the object/material
-MATSPECULAR  =      long("0xA030",16);      # SPecular color of the object/material
-MATSHINESS   =      long("0xA040",16);      # Shininess of the object/material (percent)
-MATSHIN2     =      long("0xA041",16);      # Specularity of the object/material (percent)
-MATMAP       =      long("0xA200",16);      # This is a header for a new material
-MATMAPFILE   =      long("0xA300",16);      # This holds the file name of the texture
-MATTRANS     =      long("0xA050",16);      # Transparency value (i.e. =100-OpacityValue) (percent)
+MATNAME      =      int("0xA000",16);      # This holds the material name
+MATAMBIENT   =      int("0xA010",16);      # Ambient color of the object/material
+MATDIFFUSE   =      int("0xA020",16);      # This holds the color of the object/material
+MATSPECULAR  =      int("0xA030",16);      # SPecular color of the object/material
+MATSHINESS   =      int("0xA040",16);      # Shininess of the object/material (percent)
+MATSHIN2     =      int("0xA041",16);      # Specularity of the object/material (percent)
+MATMAP       =      int("0xA200",16);      # This is a header for a new material
+MATMAPFILE   =      int("0xA300",16);      # This holds the file name of the texture
+MATTRANS     =      int("0xA050",16);      # Transparency value (i.e. =100-OpacityValue) (percent)
 
-RGB1         =      long("0x0011",16)
-RGB2         =      long("0x0012",16)
-PCT          =      long("0x0030",16)
-MASTERSCALE  =      long("0x0100",16)
+RGB1         =      int("0x0011",16)
+RGB2         =      int("0x0012",16)
+PCT          =      int("0x0030",16)
+MASTERSCALE  =      int("0x0100",16)
 
 #>------ sub defines of OBJECT
-OBJECT_MESH  =      long("0x4100",16);      # This lets us know that we are reading a new object
-OBJECT_LIGHT =      long("0x4600",16);      # This lets un know we are reading a light object
-OBJECT_CAMERA=      long("0x4700",16);      # This lets un know we are reading a camera object
+OBJECT_MESH  =      int("0x4100",16);      # This lets us know that we are reading a new object
+OBJECT_LIGHT =      int("0x4600",16);      # This lets un know we are reading a light object
+OBJECT_CAMERA=      int("0x4700",16);      # This lets un know we are reading a camera object
 
 #>------ sub defines of CAMERA
-OBJECT_CAM_RANGES=  long("0x4720",16);      # The camera range values
+OBJECT_CAM_RANGES=  int("0x4720",16);      # The camera range values
 
 #>------ sub defines of OBJECT_MESH
-OBJECT_VERTICES =   long("0x4110",16);      # The objects vertices
-OBJECT_FACES    =   long("0x4120",16);      # The objects faces
-OBJECT_MATERIAL =   long("0x4130",16);      # This is found if the object has a material, either texture map or color
-OBJECT_UV       =   long("0x4140",16);      # The UV texture coordinates
-OBJECT_TRANS_MATRIX=long("0x4160",16); # The Object Matrix
+OBJECT_VERTICES =   int("0x4110",16);      # The objects vertices
+OBJECT_FACES    =   int("0x4120",16);      # The objects faces
+OBJECT_MATERIAL =   int("0x4130",16);      # This is found if the object has a material, either texture map or color
+OBJECT_UV       =   int("0x4140",16);      # The UV texture coordinates
+OBJECT_TRANS_MATRIX=int("0x4160",16); # The Object Matrix
 
 #>------ sub defines of KFDATA
-KFDATA_KFHDR    =   long("0xB00A",16);
-KFDATA_KFSEG    =   long("0xB008",16);
-KFDATA_KFCURTIME=   long("0xB009",16);
-KFDATA_OBJECT_NODE_TAG=long("0xB002",16);
+KFDATA_KFHDR    =   int("0xB00A",16);
+KFDATA_KFSEG    =   int("0xB008",16);
+KFDATA_KFCURTIME=   int("0xB009",16);
+KFDATA_OBJECT_NODE_TAG=int("0xB002",16);
 
 #>------ sub defines of OBJECT_NODE_TAG
-OBJECT_NODE_ID  =   long("0xB030",16);
-OBJECT_NODE_HDR =   long("0xB010",16);
-OBJECT_PIVOT    =   long("0xB013",16);
-OBJECT_INSTANCE_NAME=long("0xB011",16);
-POS_TRACK_TAG   =   long("0xB020",16);
-ROT_TRACK_TAG   =   long("0xB021",16);
-SCL_TRACK_TAG   =   long("0xB022",16);
-BOUNDBOX        =   long("0xB014",16);
+OBJECT_NODE_ID  =   int("0xB030",16);
+OBJECT_NODE_HDR =   int("0xB010",16);
+OBJECT_PIVOT    =   int("0xB013",16);
+OBJECT_INSTANCE_NAME=int("0xB011",16);
+POS_TRACK_TAG   =   int("0xB020",16);
+ROT_TRACK_TAG   =   int("0xB021",16);
+SCL_TRACK_TAG   =   int("0xB022",16);
+BOUNDBOX        =   int("0xB014",16);
 
 def uv_key(uv):
 	return round(uv.x, 6), round(uv.y, 6)
@@ -422,9 +445,9 @@ class _3ds_named_variable(object):
 			for i in xrange(indent):
 				spaces+="  ";
 			if (self.name!=""):
-				print spaces, self.name, " = ", self.value
+				print( spaces, self.name, " = ", self.value )
 			else:
-				print spaces, "[unnamed]", " = ", self.value
+				print( spaces, "[unnamed]", " = ", self.value )
 
 
 #the chunk class
@@ -486,7 +509,7 @@ class _3ds_chunk(object):
 		spaces=""
 		for i in xrange(indent):
 			spaces+="  ";
-		print spaces, "ID=", hex(self.ID.value), "size=", self.get_size()
+		print( spaces, "ID=", hex(self.ID.value), "size=", self.get_size() )
 		for variable in self.variables:
 			variable.dump(indent+1)
 		for subchunk in self.subchunks:
@@ -537,7 +560,7 @@ def make_material_texture_chunk(id, images):
 	mat_sub = make_percent_subchunk(id, 1)
 
 	def add_image(img):
-		filename = img.filename.split('\\')[-1].split('/')[-1]
+		filename = img.filepath.split('\\')[-1].split('/')[-1]
 		mat_sub_file = _3ds_chunk(MATMAPFILE)
 		mat_sub_file.add_variable("mapfile", _3ds_string(sane_name(filename, "imgfile", True)))
 		mat_sub.add_subchunk(mat_sub_file)
@@ -572,12 +595,12 @@ def make_material_chunk(material, image):
 		material_chunk.add_subchunk(make_percent_subchunk(MATTRANS, 0))
 
 	else:
-		material_chunk.add_subchunk(make_material_subchunk(MATAMBIENT, [a*material.amb for a in material.rgbCol] ))
-		material_chunk.add_subchunk(make_material_subchunk(MATDIFFUSE, material.rgbCol))
-		material_chunk.add_subchunk(make_material_subchunk(MATSPECULAR, material.specCol))
-		material_chunk.add_subchunk(make_percent_subchunk(MATSHINESS, material.getRef()))
-		material_chunk.add_subchunk(make_percent_subchunk(MATSHIN2, material.getSpec()))
-		material_chunk.add_subchunk(make_percent_subchunk(MATTRANS, 1-material.getAlpha()))
+		material_chunk.add_subchunk(make_material_subchunk(MATAMBIENT, [a*material.ambient for a in material.diffuse_color] ))
+		material_chunk.add_subchunk(make_material_subchunk(MATDIFFUSE, material.diffuse_color))
+		material_chunk.add_subchunk(make_material_subchunk(MATSPECULAR, material.specular_color))
+		material_chunk.add_subchunk(make_percent_subchunk(MATSHINESS, material.roughness))
+		material_chunk.add_subchunk(make_percent_subchunk(MATSHIN2, material.specular_intensity))
+		material_chunk.add_subchunk(make_percent_subchunk(MATTRANS, 1-material.alpha))
 
 		# 4KEX: Removed call to get images for the material. Will export UV image ONLY.
 		#images = get_material_images(material) # can be None
@@ -1136,11 +1159,19 @@ def write_sup( file, ob, isEmpty ):
 
 	file.write( '\r\n' )
 
+def append_to_name_to(objects,name_to_id,name_to_scale,name_to_pos,name_to_rot):
+	for ob in objects:
+		obj_by_name = bpy.data.objects[ob.name]
+		name_to_id[ob.name]= len(name_to_id)
+		name_to_scale[ob.name] = obj_by_name.dimensions
+		name_to_pos[ob.name] = obj_by_name.location
+		name_to_rot[ob.name] = obj_by_name.rotation_quaternion.inverted()
+		# 4KEX: Convert rotation euler from radians to degrees
+		name_to_rot[ob.name][0] = name_to_rot[ob.name][0] * 180.0 / math.pi
+		name_to_rot[ob.name][1] = name_to_rot[ob.name][1] * 180.0 / math.pi
+		name_to_rot[ob.name][2] = name_to_rot[ob.name][2] * 180.0 / math.pi
 
-
-
-import BPyMessages
-def save_3ds(filename):
+def save_3ds(exportOptions, filename):
 	global CS_GLOBALOPTIONS_OBJ
 	'''Save the Blender scene to a 3ds file.'''
 	# Time the export
@@ -1148,13 +1179,10 @@ def save_3ds(filename):
 	if not filename.lower().endswith('.3ds'):
 		filename += '.3ds'
 
-	if not BPyMessages.Warning_SaveOver(filename):
-		return
-
-	time1= Blender.sys.time()
+	time1= time.time()
 	bpy.context.window.cursor_set('WAIT')
 
-	sce= bpy.data.scenes.active
+	sce = bpy.context.scene
 
 	# Initialize the main chunk (primary):
 	primary = _3ds_chunk(PRIMARY)
@@ -1172,62 +1200,33 @@ def save_3ds(filename):
 	kfdata = make_kfdata()
 
 	# Get all the supported objects selected in this scene:
-	ob_sel= list(sce.objects.context)
+	ob_sel= sce.objects
 	for ob in ob_sel:
 		if ob.name.upper() == '~CS_GLOBALOPTIONS':
 			ob_sel.remove(ob)
 			CS_GLOBALOPTIONS_OBJ = ob
 			break
-	mesh_objects = [ (ob, me) for ob in ob_sel   for me in (BPyMesh.getMeshFromObject(ob, None, True, False, sce),) if me ]
-	empty_objects = [ ob for ob in ob_sel if ob.type == 'Empty' ]
+
+	mesh_objects = [ ob for ob in bpy.data.meshes if ob.name in bpy.data.objects]
+	empty_objects = [ ob for ob in ob_sel if ob.type == 'EMPTY' ]
 
 	# Make a list of all materials used in the selected meshes (use a dictionary,
 	# each material is added once):
-	materialDict = {}
-	mesh_objects = []
-	for ob in ob_sel:
-		for ob_derived, mat in getDerivedObjects(ob, False):
-			data = getMeshFromObject(ob_derived, None, True, False, sce)
-			if data:
-				# 4KEX: Removed mesh transformation. Will do this later based on parenting and other factors.
-				#data.transform(mat, recalc_normals=False)
-				mesh_objects.append((ob_derived, data))
-				mat_ls = data.materials
-				mat_ls_len = len(mat_ls)
-				# get material/image tuples.
-				if data.faceUV:
-					if not mat_ls:
-						mat = mat_name = None
-
-					for f in data.faces:
-						if mat_ls:
-							mat_index = f.mat
-							if mat_index >= mat_ls_len:
-								mat_index = f.mat = 0
-							mat = mat_ls[mat_index]
-							if mat:	mat_name = mat.name
-							else:	mat_name = None
-						# else there alredy set to none
-
-						img = f.image
-						if img:	img_name = img.name
-						else:	img_name = None
-
-						materialDict.setdefault((mat_name, img_name), (mat, img) )
-
-
+	materialDict = dict()
+	
+	# The original code iterated over all objects, inspecting them
+	# and depending if they were meshes building the material dictionary
+	# Now we iterate directly over meshes and their materials
+	for ob in mesh_objects:
+		for mat in ob.materials:
+			for tex in mat.texture_slots:
+				if tex:
+					materialDict.setdefault( (mat.name,tex.texture.image.name) ,(mat,tex.texture.image ))
 				else:
-					for mat in mat_ls:
-						if mat: # material may be None so check its not.
-							materialDict.setdefault((mat.name, None), (mat, None) )
-
-					# Why 0 Why!
-					for f in data.faces:
-						if f.mat >= mat_ls_len:
-							f.mat = 0
+					materialDict.setdefault( (mat.name,None) ,(mat, None ))
 
 	# Make material chunks for all materials used in the meshes:
-	for mat_and_image in materialDict.itervalues():
+	for mat_and_image in materialDict.values():
 		object_info.add_subchunk(make_material_chunk(mat_and_image[0], mat_and_image[1]))
 
 	# 4KEX: Added MASTERSCALE element
@@ -1240,45 +1239,24 @@ def save_3ds(filename):
 	name_to_scale = {}
 	name_to_pos = {}
 	name_to_rot = {}
-	for ob, data in mesh_objects:
-		name_to_id[ob.name]= len(name_to_id)
-		name_to_scale[ob.name] = ob.getSize('worldspace')
-		name_to_pos[ob.name] = ob.getLocation('worldspace')
-		name_to_rot[ob.name] = ob.getEuler('worldspace')
-
-		# 4KEX: Convert rotation euler from radians to degrees
-		name_to_rot[ob.name][0] = name_to_rot[ob.name][0] * 180.0 / math.pi
-		name_to_rot[ob.name][1] = name_to_rot[ob.name][1] * 180.0 / math.pi
-		name_to_rot[ob.name][2] = name_to_rot[ob.name][2] * 180.0 / math.pi
-		name_to_rot[ob.name] = name_to_rot[ob.name].toQuat().inverse()
-
-	for ob in empty_objects:
-		name_to_id[ob.name]= len(name_to_id)
-		name_to_scale[ob.name] = ob.getSize('worldspace')
-		name_to_pos[ob.name] = ob.getLocation('worldspace')
-		name_to_rot[ob.name] = ob.getEuler('worldspace')
-
-		# 4KEX: Convert rotation euler from radians to degrees
-		name_to_rot[ob.name][0] = name_to_rot[ob.name][0] * 180.0 / math.pi
-		name_to_rot[ob.name][1] = name_to_rot[ob.name][1] * 180.0 / math.pi
-		name_to_rot[ob.name][2] = name_to_rot[ob.name][2] * 180.0 / math.pi
-		name_to_rot[ob.name] = name_to_rot[ob.name].toQuat().inverse()
+	append_to_name_to(mesh_objects,name_to_id,name_to_scale,name_to_pos,name_to_rot)
+	append_to_name_to(empty_objects,name_to_id,name_to_scale,name_to_pos,name_to_rot)
 
 	# Create object chunks for all meshes:
 	i = 0
-	for ob, blender_mesh in mesh_objects:
+	for mesh in mesh_objects:
 		# create a new object chunk
 		object_chunk = _3ds_chunk(OBJECT)
 
 		# set the object name
-		object_chunk.add_variable("name", _3ds_string(sane_name(ob.name, "object", False)))
+		object_chunk.add_variable("name", _3ds_string(sane_name(mesh.name, "object", False)))
 
 		# make a mesh chunk out of the mesh:
-		object_chunk.add_subchunk(make_mesh_chunk(blender_mesh, materialDict, ob, name_to_id, name_to_scale, name_to_pos, name_to_rot))
+		object_chunk.add_subchunk(make_mesh_chunk(mesh, materialDict, ob, name_to_id, name_to_scale, name_to_pos, name_to_rot))
 		object_info.add_subchunk(object_chunk)
 
 		# 4KEX: export kfdata node
-		kfdata.add_subchunk(make_kf_obj_node(ob, name_to_id, name_to_scale, name_to_pos, name_to_rot))
+		kfdata.add_subchunk(make_kf_obj_node(mesh, name_to_id, name_to_scale, name_to_pos, name_to_rot))
 		blender_mesh.verts = None
 		i+=i
 
@@ -1308,13 +1286,12 @@ def save_3ds(filename):
 	file.close()
 
 	# Check if SUP file is requested
-	global ENABLE_SUP
-	if ENABLE_SUP:
+	if exportOptions.enablesup:
 		# Open the SUP file
 		file = open( filename[:-4]+'.sup', 'w' )
 
 		# Write the RootFrame object
-		if ENABLE_BETA:
+		if exportOptions.enablebeta:
 			file.write( '[RootFrame]\r\nIsPivot=BOOL:No\r\nName=STRING:RootFrame\r\nParent=STRING:\r\nPivot=STRING:\r\n\r\n' )
 		else:
 			file.write( '[RootFrame]\r\nIsPivot=No\r\nName=RootFrame\r\nParent=\r\nPivot=\r\n\r\n' )
@@ -1330,21 +1307,29 @@ def save_3ds(filename):
 		# Close the SUP file
 		file.close()
 
-	global ENABLE_KEX
-	if ENABLE_KEX:
-		global KEX_FILE
-		cmd_line = '""' + KEX_FILE + '" -s -v3 \"' + filename + '\""'
+	if exportOptions.enablekex:
+		cmd_line = '""' + exportOptions.kexfile + '" -s -v3 \"' + filename + '\""'
 		os.system(cmd_line)
 
 	# Debugging only: report the exporting time:
 	bpy.context.window.cursor_set('DEFAULT')
-	print "3ds export time: %.2f" % (Blender.sys.time() - time1)
+	print( "3ds export time: %.2f" % (time.time() - time1) )
 
 	# Debugging only: dump the chunk hierarchy:
 	#primary.dump()
 
 
 if __name__=='__main__':
-	registry_import()
-	Blender.Window.FileSelector(save_3ds, "Export 3DS", Blender.sys.makename(ext='.3ds'))
-# save_3ds('/test_b.3ds')
+    try:
+        unregister()
+    except:
+        pass    
+    register()
+    OBJECT_OT_kex_export.filepath = 'test'
+    OBJECT_OT_kex_export.kexfile = ''
+    OBJECT_OT_kex_export.enablekex = False
+    
+    OBJECT_OT_kex_export.enablesup = False
+    OBJECT_OT_kex_export.enablebeta = False
+    save_3ds(OBJECT_OT_kex_export, OBJECT_OT_kex_export.filepath )
+# save_3ds( '/test_b.3ds' )
