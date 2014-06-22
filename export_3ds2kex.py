@@ -756,10 +756,6 @@ def make_faces_chunk(tri_list, mesh, materialDict):
 				
 				context_mat_face_array = _3ds_array()
 				unique_mats[mat, img] = _3ds_string(sane_name(name_str, "material", False)), context_mat_face_array
-			if img == None:
-				print("Mesh " + mesh.name + " is not using any image materials")
-			else:
-				print("Mesh " + mesh.name + " is using image " + img )
 			materialDict.setdefault( (mat,img) ,(materials[tri.mat],bpy.data.images[img] if img else None))
 			context_mat_face_array.add(_3ds_short(i))
 
@@ -1233,8 +1229,6 @@ def save_3ds(exportOptions, filename):
 
 		# make a mesh chunk out of the mesh:
 		mesh_chunk = make_mesh_chunk(blender_mesh, materialDict, ob, name_to_id, name_to_scale, name_to_pos, name_to_rot)
-#		mesh_chunk.dump()
-#		print("Created mesh chunk for {0} with {1} subchunks, size {2}".format(ob.name,len(mesh_chunk.subchunks), mesh_chunk.get_size()) )
 		object_chunk.add_subchunk(mesh_chunk)
 		object_info.add_subchunk(object_chunk)
 
@@ -1252,11 +1246,8 @@ def save_3ds(exportOptions, filename):
 	primary.add_subchunk(object_info)
 
 	# Make material chunks for all materials used in the meshes:
-#	print("----- Material Dict -----")
-#	print(materialDict.values())
 	for mat_and_image in materialDict.values():
 		material_chunk = make_material_chunk(mat_and_image[0], mat_and_image[1])
-#		material_chunk.dump()
 		object_info.add_subchunk(material_chunk)
 
 	# 4KEX: Export kfdata
