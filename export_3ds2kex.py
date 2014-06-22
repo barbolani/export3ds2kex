@@ -1,28 +1,16 @@
 #!BPY
 # coding: utf-8
-"""
-Name: '3D Studio 2KEX (.kex)...'
-Blender: 243
-Group: 'Export'
-Tooltip: 'Export to KEX file format using 3DS (.kex).'
-"""
+# 3ds Exporter for KEX
 
-__author__ = ["Campbell Barton", "Bob Holcomb", "Richard Lärkäng", "Damien McGinnes", "Mark Stijnman"]
-__url__ = ("blenderartists.org", "www.blender.org", "www.gametutorials.com", "lib3ds.sourceforge.net/")
-__version__ = "0.99b"
-__bpydoc__ = """\
+# This script Exports a 3ds file primarily for KEX translation into Real Flight G3.5
 
-3ds Exporter for KEX
+# The KEX version of this script is based on the 3ds exporter available with blender. (v0.90a)
+# Automatically creates KEX SUP file.
+# Optionally calls 3DS2KEX.exe utility from Knife Edge software to create KEX file.
 
-This script Exports a 3ds file primarily for KEX translation into Real Flight G3.5
-
-The KEX version of this script is based on the 3ds exporter available with blender. (v0.90a)
-Automatically creates KEX SUP file.
-Optionally calls 3DS2KEX.exe utility from Knife Edge software to create KEX file.
-
-Exporting is based on 3ds loader from www.gametutorials.com(Thanks DigiBen) and using information
-from the lib3ds project (http://lib3ds.sourceforge.net/) sourcecode.
-"""
+# Exporting is based on 3ds loader from www.gametutorials.com(Thanks DigiBen) and using information
+# from the lib3ds project (http://lib3ds.sourceforge.net/) sourcecode.
+#
 
 
 # ***** BEGIN GPL LICENSE BLOCK *****
@@ -52,7 +40,7 @@ from the lib3ds project (http://lib3ds.sourceforge.net/) sourcecode.
 
 bl_info = {
     "name": "Export to KEX (RealFlight) file format",
-    "author": ["Campbell Barton", "Bob Holcomb", "Richard Lärkäng", "Damien McGinnes", "Mark Stijnman","Alfonso Garcia Patino"],
+    "author": ["Campbell Barton", "Bob Holcomb", "Richard Lärkäng", "Damien McGinnes", "Mark Stijnman","Alfonso Garcia"],
     "version": (1, 0),
     "blender": (2, 7, 0),
     "location": "File -> Export -> Export to KEX file",
@@ -68,14 +56,9 @@ bl_info = {
 ######################################################
 
 import math
+import mathutils
 import time
-# import Blender
 import bpy
-# import bpy.mesh
-# import bpy.object
-# from BPyMesh import getMeshFromObject
-# from BPyObject import getDerivedObjects
-# from Blender import Registry
 import struct
 import sys
 import os
@@ -125,7 +108,9 @@ class OBJECT_OT_kex_export(Operator,AddonPreferences):
         return {'RUNNING_MODAL'}    
 
     def execute(self, context):
-        save_3ds(self, self.filename)
+        bpy.context.window.cursor_set('WAIT')
+        save_3ds(self, self.filepath)
+        bpy.context.window.cursor_set('DEFAULT')
         return {'FINISHED'}
 
 def menu_func(self, context):
@@ -133,8 +118,8 @@ def menu_func(self, context):
 	self.layout.operator(OBJECT_OT_kex_export.bl_idname, text="Export to KEX file")
 		
 def register():
-    bpy.utils.register_class(OBJECT_OT_kex_export)
-    bpy.types.INFO_MT_file_export.append(menu_func)
+	bpy.utils.register_class(OBJECT_OT_kex_export)
+	bpy.types.INFO_MT_file_export.append(menu_func)
 
 def unregister():		
     bpy.types.INFO_MT_file_export.remove(menu_func)
@@ -255,6 +240,7 @@ class _3ds_short(object):
 		return SZ_SHORT
 
 	def write(self,file):
+		self.value = int(self.value)
 		if (self.value>32767):
 			file.write(struct.pack("<H", self.value))
 		else:
@@ -296,7 +282,7 @@ class _3ds_float(object):
 
 class _3ds_string(object):
 	'''Class representing a zero-terminated string for a 3ds file.'''
-	__slots__ = 'value'
+	__slots__ = ('value',)
 	def __init__(self, val=""):
 		self.value=val
 
@@ -305,7 +291,7 @@ class _3ds_string(object):
 
 	def write(self,file):
 		binary_format = "<%ds" % (len(self.value)+1)
-		file.write(struct.pack(binary_format, self.value))
+		file.write(struct.pack(binary_format, bytearray(self.value,'ascii')))
 
 	def __str__(self):
 		return self.value
@@ -371,7 +357,10 @@ class _3ds_rgb_color(object):
 		return 3
 
 	def write(self,file):
-		file.write( struct.pack('<3c', chr(int(255*self.r)), chr(int(255*self.g)), chr(int(255*self.b)) ) )
+		br =int(255*self.r).to_bytes(1,'little')
+		bg =int(255*self.g).to_bytes(1,'little')
+		bb =int(255*self.b).to_bytes(1,'little')
+		file.write( struct.pack('<3c', br, bg, bb ) )
 
 	def __str__(self):
 		return '{%f, %f, %f}' % (self.r, self.g, self.b)
@@ -442,7 +431,7 @@ class _3ds_named_variable(object):
 	def dump(self,indent):
 		if (self.value!=None):
 			spaces=""
-			for i in xrange(indent):
+			for i in range(indent):
 				spaces+="  ";
 			if (self.name!=""):
 				print( spaces, self.name, " = ", self.value )
@@ -507,7 +496,7 @@ class _3ds_chunk(object):
 		Dump is used for debugging purposes, to dump the contents of a chunk to the standard output.
 		Uses the dump function of the named variables and the subchunks to do the actual work.'''
 		spaces=""
-		for i in xrange(indent):
+		for i in range(indent):
 			spaces+="  ";
 		print( spaces, "ID=", hex(self.ID.value), "size=", self.get_size() )
 		for variable in self.variables:
@@ -560,7 +549,8 @@ def make_material_texture_chunk(id, images):
 	mat_sub = make_percent_subchunk(id, 1)
 
 	def add_image(img):
-		filename = img.filepath.split('\\')[-1].split('/')[-1]
+		#filename = img.filepath.split('\\')[-1].split('/')[-1]
+		filename = img.name
 		mat_sub_file = _3ds_chunk(MATMAPFILE)
 		mat_sub_file.add_variable("mapfile", _3ds_string(sane_name(filename, "imgfile", True)))
 		mat_sub.add_subchunk(mat_sub_file)
@@ -602,15 +592,11 @@ def make_material_chunk(material, image):
 		material_chunk.add_subchunk(make_percent_subchunk(MATSHIN2, material.specular_intensity))
 		material_chunk.add_subchunk(make_percent_subchunk(MATTRANS, 1-material.alpha))
 
-		# 4KEX: Removed call to get images for the material. Will export UV image ONLY.
-		#images = get_material_images(material) # can be None
 		images = []
-
-		if image: images.append(image)
-
-		if images:
+		if image:
+			images.append(image)
 			material_chunk.add_subchunk(make_material_texture_chunk(MATMAP, images))
-
+			
 	return material_chunk
 
 class tri_wrapper(object):
@@ -626,64 +612,66 @@ class tri_wrapper(object):
 		self.faceuvs= faceuvs
 		self.offset= [0, 0, 0] # offset indicies
 
-
 def extract_triangles(mesh):
-	'''Extract triangles from a mesh.
+	"""Extract triangles from a mesh.
 
-	If the mesh contains quads, they will be split into triangles.'''
+ 	If the mesh contains quads, they will be split into triangles.
+	Assumes caller has already calculated tessfaces on the mesh"""
 	tri_list = []
-	do_uv = mesh.faceUV
-
-	if not do_uv:
-		face_uv = None
 
 	img = None
-	for face in mesh.faces:
-		f_v = face.verts
+	do_uv = bool(mesh.tessface_uv_textures)
+	for i, face in enumerate(mesh.tessfaces):
+		f_v = face.vertices
+
+		uf = mesh.tessface_uv_textures.active.data[i] if do_uv else None
 
 		if do_uv:
-			f_uv = face.uv
-			img = face.image
-			if img: img = img.name
+			f_uv = uf.uv
+			img = uf.image if uf else None
+			if img is not None:
+				img = img.name
 
-		if len(f_v)==3:
-			new_tri = tri_wrapper((f_v[0].index, f_v[1].index, f_v[2].index), face.mat, img)
-			if (do_uv): new_tri.faceuvs= uv_key(f_uv[0]), uv_key(f_uv[1]), uv_key(f_uv[2])
+        # if f_v[3] == 0:
+		if len(f_v) == 3:
+			new_tri = tri_wrapper((f_v[0], f_v[1], f_v[2]), face.material_index, img)
+			if (do_uv):
+				new_tri.faceuvs = uv_key(f_uv[0].data.uv1), uv_key(f_uv[1].data.uv1), uv_key(f_uv[2].data.uv1)
 			tri_list.append(new_tri)
 
-		else: #it's a quad
-			new_tri = tri_wrapper((f_v[0].index, f_v[1].index, f_v[2].index), face.mat, img)
-			new_tri_2 = tri_wrapper((f_v[0].index, f_v[2].index, f_v[3].index), face.mat, img)
+		else:  # it's a quad
+			new_tri = tri_wrapper((f_v[0], f_v[1], f_v[2]), face.material_index, img)
+			new_tri_2 = tri_wrapper((f_v[0], f_v[2], f_v[3]), face.material_index, img)
 
 			if (do_uv):
-				new_tri.faceuvs= uv_key(f_uv[0]), uv_key(f_uv[1]), uv_key(f_uv[2])
-				new_tri_2.faceuvs= uv_key(f_uv[0]), uv_key(f_uv[2]), uv_key(f_uv[3])
+				new_tri.faceuvs = uv_key(f_uv[0].data.uv1), uv_key(f_uv[1].data.uv1), uv_key(f_uv[2].data.uv1)
+				new_tri_2.faceuvs = uv_key(f_uv[0].data.uv1), uv_key(f_uv[2].data.uv1), uv_key(f_uv[3].data.uv1)
 
-			tri_list.append( new_tri )
-			tri_list.append( new_tri_2 )
+			tri_list.append(new_tri)
+			tri_list.append(new_tri_2)
 
 	return tri_list
 
 
 def remove_face_uv(verts, tri_list):
-	'''Remove face UV coordinates from a list of triangles.
+	"""Remove face UV coordinates from a list of triangles.
 
-	Since 3ds files only support one pair of uv coordinates for each vertex, face uv coordinates
-	need to be converted to vertex uv coordinates. That means that vertices need to be duplicated when
-	there are multiple uv coordinates per vertex.'''
+    Since 3ds files only support one pair of uv coordinates for each vertex, face uv coordinates
+    need to be converted to vertex uv coordinates. That means that vertices need to be duplicated when
+    there are multiple uv coordinates per vertex."""
 
-	# initialize a list of UniqueLists, one per vertex:
-	#uv_list = [UniqueList() for i in xrange(len(verts))]
-	unique_uvs= [{} for i in xrange(len(verts))]
+    # initialize a list of UniqueLists, one per vertex:
+    #uv_list = [UniqueList() for i in range(len(verts))]
+	unique_uvs = [{} for i in range(len(verts))]
 
-	# for each face uv coordinate, add it to the UniqueList of the vertex
+    # for each face uv coordinate, add it to the UniqueList of the vertex
 	for tri in tri_list:
-		for i in xrange(3):
-			# store the index into the UniqueList for future reference:
-			# offset.append(uv_list[tri.vertex_index[i]].add(_3ds_point_uv(tri.faceuvs[i])))
+		for i in range(3):
+            # store the index into the UniqueList for future reference:
+            # offset.append(uv_list[tri.vertex_index[i]].add(_3ds_point_uv(tri.faceuvs[i])))
 
-			context_uv_vert= unique_uvs[tri.vertex_index[i]]
-			uvkey= tri.faceuvs[i]
+			context_uv_vert = unique_uvs[tri.vertex_index[i]]
+			uvkey = tri.faceuvs[i]
 
 			offset_index__uv_3ds = context_uv_vert.get(uvkey)
 
@@ -692,50 +680,48 @@ def remove_face_uv(verts, tri_list):
 
 			tri.offset[i] = offset_index__uv_3ds[0]
 
+    # At this point, each vertex has a UniqueList containing every uv coordinate that is associated with it
+    # only once.
 
-
-	# At this point, each vertex has a UniqueList containing every uv coordinate that is associated with it
-	# only once.
-
-	# Now we need to duplicate every vertex as many times as it has uv coordinates and make sure the
-	# faces refer to the new face indices:
+    # Now we need to duplicate every vertex as many times as it has uv coordinates and make sure the
+    # faces refer to the new face indices:
 	vert_index = 0
 	vert_array = _3ds_array()
 	uv_array = _3ds_array()
 	index_list = []
-	for i,vert in enumerate(verts):
+	for i, vert in enumerate(verts):
 		index_list.append(vert_index)
 
-		pt = _3ds_point_3d(vert.co) # reuse, should be ok
+		pt = _3ds_point_3d(vert.co)  # reuse, should be ok
 		uvmap = [None] * len(unique_uvs[i])
-		for ii, uv_3ds in unique_uvs[i].itervalues():
+		for ii, uv_3ds in unique_uvs[i].values():
 			# add a vertex duplicate to the vertex_array for every uv associated with this vertex:
 			vert_array.add(pt)
-			# add the uv coordinate to the uv array:
-			# This for loop does not give uv's ordered by ii, so we create a new map
-			# and add the uv's later
-			# uv_array.add(uv_3ds)
+            # add the uv coordinate to the uv array:
+            # This for loop does not give uv's ordered by ii, so we create a new map
+            # and add the uv's later
+            # uv_array.add(uv_3ds)
 			uvmap[ii] = uv_3ds
 
-		# Add the uv's in the correct order
+        # Add the uv's in the correct order
 		for uv_3ds in uvmap:
-			# add the uv coordinate to the uv array:
+            # add the uv coordinate to the uv array:
 			uv_array.add(uv_3ds)
 
 		vert_index += len(unique_uvs[i])
 
-	# Make sure the triangle vertex indices now refer to the new vertex list:
+    # Make sure the triangle vertex indices now refer to the new vertex list:
 	for tri in tri_list:
-		for i in xrange(3):
-			tri.offset[i]+=index_list[tri.vertex_index[i]]
-		tri.vertex_index= tri.offset
+		for i in range(3):
+			tri.offset[i] += index_list[tri.vertex_index[i]]
+		tri.vertex_index = tri.offset
 
 	return vert_array, uv_array, tri_list
 
 def make_faces_chunk(tri_list, mesh, materialDict):
-	'''Make a chunk for the faces.
+	"""Make a chunk for the faces.
 
-	Also adds subchunks assigning materials to all faces.'''
+	Also adds subchunks assigning materials to all faces."""
 
 	materials = mesh.materials
 	if not materials:
@@ -744,60 +730,64 @@ def make_faces_chunk(tri_list, mesh, materialDict):
 	face_chunk = _3ds_chunk(OBJECT_FACES)
 	face_list = _3ds_array()
 
-
-	if mesh.faceUV:
-		# Gather materials used in this mesh - mat/image pairs
+	if mesh.tessface_uv_textures:
+        # Gather materials used in this mesh - mat/image pairs
 		unique_mats = {}
-		for i,tri in enumerate(tri_list):
+		for i, tri in enumerate(tri_list):
 
 			face_list.add(_3ds_face(tri.vertex_index))
 
 			if materials:
 				mat = materials[tri.mat]
-				if mat: mat = mat.name
+				if mat:
+					mat = mat.name
 
 			img = tri.image
 
 			try:
-				context_mat_face_array = unique_mats[mat, img][1]
+				context_mat_face_array = unique_mats[mat_name, img][1]
 			except:
-
-				if mat:	name_str = mat
-				else:	name_str = 'None'
-				if img: name_str += " " + img
-
+				if mat:
+					name_str = mat
+				else:	
+					name_str = 'None'
+				if img: 
+					name_str += " " + img
+				
 				context_mat_face_array = _3ds_array()
 				unique_mats[mat, img] = _3ds_string(sane_name(name_str, "material", False)), context_mat_face_array
-
-
+			if img == None:
+				print("Mesh " + mesh.name + " is not using any image materials")
+			else:
+				print("Mesh " + mesh.name + " is using image " + img )
+			materialDict.setdefault( (mat,img) ,(materials[tri.mat],bpy.data.images[img] if img else None))
 			context_mat_face_array.add(_3ds_short(i))
-			# obj_material_faces[tri.mat].add(_3ds_short(i))
 
 		face_chunk.add_variable("faces", face_list)
-		for mat_name, mat_faces in unique_mats.itervalues():
-			obj_material_chunk=_3ds_chunk(OBJECT_MATERIAL)
+		for mat_name, mat_faces in unique_mats.values():
+			obj_material_chunk = _3ds_chunk(OBJECT_MATERIAL)
 			obj_material_chunk.add_variable("name", mat_name)
 			obj_material_chunk.add_variable("face_list", mat_faces)
 			face_chunk.add_subchunk(obj_material_chunk)
 
 	else:
 
-		obj_material_faces=[]
-		obj_material_names=[]
+		obj_material_faces = []
+		obj_material_names = []
 		for m in materials:
 			if m:
-				obj_material_names.append(_3ds_string(sane_name(m.name, "material", False)))
+				obj_material_names.append(_3ds_string(sane_name(m.name,"material",False)))
 				obj_material_faces.append(_3ds_array())
 		n_materials = len(obj_material_names)
 
-		for i,tri in enumerate(tri_list):
+		for i, tri in enumerate(tri_list):
 			face_list.add(_3ds_face(tri.vertex_index))
 			if (tri.mat < n_materials):
 				obj_material_faces[tri.mat].add(_3ds_short(i))
 
 		face_chunk.add_variable("faces", face_list)
-		for i in xrange(n_materials):
-			obj_material_chunk=_3ds_chunk(OBJECT_MATERIAL)
+		for i in range(n_materials):
+			obj_material_chunk = _3ds_chunk(OBJECT_MATERIAL)
 			obj_material_chunk.add_variable("name", obj_material_names[i])
 			obj_material_chunk.add_variable("face_list", obj_material_faces[i])
 			face_chunk.add_subchunk(obj_material_chunk)
@@ -837,46 +827,39 @@ def GetRealLocalMatrix(obj):
 
 	return m
 
-def make_mesh_chunk(mesh, materialDict, ob, name_to_id, name_to_scale, name_to_pos, name_to_rot):
-	'''Make a chunk out of a Blender mesh.'''
+def make_mesh_chunk(mesh, materialDict,ob, name_to_id, name_to_scale, name_to_pos, name_to_rot):
+	"""Make a chunk out of a Blender mesh."""
 
-	# Extract the triangles from the mesh:
+    # Extract the triangles from the mesh:
 	tri_list = extract_triangles(mesh)
-
-	if mesh.faceUV:
-		# Remove the face UVs and convert it to vertex UV:
-		vert_array, uv_array, tri_list = remove_face_uv(mesh.verts, tri_list)
+	if mesh.tessface_uv_textures:
+        # Remove the face UVs and convert it to vertex UV:
+		vert_array, uv_array, tri_list = remove_face_uv(mesh.vertices, tri_list)
 	else:
-		# Add the vertices to the vertex array:
+        # Add the vertices to the vertex array:
 		vert_array = _3ds_array()
-		for vert in mesh.verts:
+		for vert in mesh.vertices:
 			vert_array.add(_3ds_point_3d(vert.co))
-		# If the mesh has vertex UVs, create an array of UVs:
-		if mesh.vertexUV:
-			uv_array = _3ds_array()
-			for vert in mesh.verts:
-				uv_array.add(_3ds_point_uv(vert.uvco))
-		else:
-			# no UV at all:
-			uv_array = None
+        # no UV at all:
+		uv_array = None
 
-	# create the chunk:
+    # create the chunk:
 	mesh_chunk = _3ds_chunk(OBJECT_MESH)
 
-	# add vertex chunk:
+    # add vertex chunk:
 	mesh_chunk.add_subchunk(make_vert_chunk(vert_array))
-	# add faces chunk:
+    # add faces chunk:
 
 	mesh_chunk.add_subchunk(make_faces_chunk(tri_list, mesh, materialDict))
 
-	mesh1 = _3ds_chunk(OBJECT_TRANS_MATRIX);
+	mesh1 = _3ds_chunk(OBJECT_TRANS_MATRIX)
 
 	# 4KEX: 3DS mesh matrix. Apply the worldspace scale and positioning relative to the parent (if any).
 	if (ob.parent == None) or (ob.parent.name not in name_to_id):
 		matrix_pos = (-name_to_pos[ob.name][0],-name_to_pos[ob.name][1],-name_to_pos[ob.name][2])
 	else:
-		matrix_pos = Blender.Mathutils.Vector((name_to_pos[ob.parent.name][0]-name_to_pos[ob.name][0],name_to_pos[ob.parent.name][1]-name_to_pos[ob.name][1],name_to_pos[ob.parent.name][2]-name_to_pos[ob.name][2] )) * name_to_rot[ob.parent.name].toMatrix()
-	ob_matrix = Blender.Mathutils.Matrix().identity().resize4x4()
+		matrix_pos = mathutils.Vector((name_to_pos[ob.parent.name][0]-name_to_pos[ob.name][0],name_to_pos[ob.parent.name][1]-name_to_pos[ob.name][1],name_to_pos[ob.parent.name][2]-name_to_pos[ob.name][2] ))*name_to_rot[ob.parent.name].to_matrix()
+	ob_matrix = mathutils.Matrix().Identity(4)
 	ob_matrix[0][0] = 1.0/name_to_scale[ob.name][0]
 	ob_matrix[1][1] = 1.0/name_to_scale[ob.name][1]
 	ob_matrix[2][2] = 1.0/name_to_scale[ob.name][2]
@@ -983,7 +966,7 @@ def make_kf_obj_node(obj, name_to_id, name_to_scale, name_to_pos, name_to_rot):
 	# object node header:
 	obj_node_header_chunk = _3ds_chunk(OBJECT_NODE_HDR)
 	# object name:
-	if obj.type == 'Empty' and False:	#Forcing to use the real name for empties 4KEX
+	if obj.type == 'EMPTY' and False:	#Forcing to use the real name for empties 4KEX
 		# Empties are called "$$$DUMMY" and use the OBJECT_INSTANCE_NAME chunk
 		# for their 3name (see below):
 		obj_node_header_chunk.add_variable("name", _3ds_string("$$$DUMMY"))
@@ -1013,13 +996,13 @@ def make_kf_obj_node(obj, name_to_id, name_to_scale, name_to_pos, name_to_rot):
 	if (parent == None) or (parent.name not in name_to_id):
 		pivot_pos = (name_to_pos[name][0],name_to_pos[name][1],name_to_pos[name][2])
 	else:
-		pivot_pos = Blender.Mathutils.Vector(((name_to_pos[name][0]-name_to_pos[parent.name][0]),(name_to_pos[name][1]-name_to_pos[parent.name][1]),(name_to_pos[name][2]-name_to_pos[parent.name][2]))) * name_to_rot[parent.name].toMatrix()
+		pivot_pos = mathutils.Vector(((name_to_pos[name][0]-name_to_pos[parent.name][0]),(name_to_pos[name][1]-name_to_pos[parent.name][1]),(name_to_pos[name][2]-name_to_pos[parent.name][2]))) * name_to_rot[parent.name].to_matrix()
 	obj_pivot_chunk = _3ds_chunk(OBJECT_PIVOT)
 	obj_pivot_chunk.add_variable("pivot", _3ds_point_3d(pivot_pos))
 	kf_obj_node.add_subchunk(obj_pivot_chunk)
 
 	# Empty objects need to have an extra chunk for the instance name:
-	if obj.type == 'Empty' and False:	#Will use a real object name for empties for now 4KEX
+	if obj.type == 'EMPTY' and False:	#Will use a real object name for empties for now 4KEX
 		obj_instance_name_chunk = _3ds_chunk(OBJECT_INSTANCE_NAME)
 		obj_instance_name_chunk.add_variable("name", _3ds_string(sane_name(name, "object", False)))
 		kf_obj_node.add_subchunk(obj_instance_name_chunk)
@@ -1033,8 +1016,8 @@ def make_kf_obj_node(obj, name_to_id, name_to_scale, name_to_pos, name_to_rot):
 		obj_rot = name_to_rot[name]
 	else:
 		obj_size = (1.0,1.0,1.0)
-		obj_pos = Blender.Mathutils.Vector(((name_to_pos[name][0]-name_to_pos[parent.name][0]),(name_to_pos[name][1]-name_to_pos[parent.name][1]),(name_to_pos[name][2]-name_to_pos[parent.name][2]))) * name_to_rot[parent.name].toMatrix()
-		obj_rot = Blender.Mathutils.CrossQuats( name_to_rot[name], name_to_rot[parent.name].copy().inverse() )
+		obj_pos = mathutils.Vector(((name_to_pos[name][0]-name_to_pos[parent.name][0]),(name_to_pos[name][1]-name_to_pos[parent.name][1]),(name_to_pos[name][2]-name_to_pos[parent.name][2]))) * name_to_rot[parent.name].to_matrix()
+		obj_rot = name_to_rot[name] * name_to_rot[parent.name].inverted() 
 
 	kf_obj_node.add_subchunk(make_track_chunk(SCL_TRACK_TAG, obj, obj_size, obj_pos, obj_rot))
 	kf_obj_node.add_subchunk(make_track_chunk(ROT_TRACK_TAG, obj, obj_size, obj_pos, obj_rot))
@@ -1160,12 +1143,11 @@ def write_sup( file, ob, isEmpty ):
 	file.write( '\r\n' )
 
 def append_to_name_to(objects,name_to_id,name_to_scale,name_to_pos,name_to_rot):
-	for ob in objects:
-		obj_by_name = bpy.data.objects[ob.name]
+	for ob,something in objects:
 		name_to_id[ob.name]= len(name_to_id)
-		name_to_scale[ob.name] = obj_by_name.dimensions
-		name_to_pos[ob.name] = obj_by_name.location
-		name_to_rot[ob.name] = obj_by_name.rotation_quaternion.inverted()
+		name_to_scale[ob.name] = ob.dimensions
+		name_to_pos[ob.name] = ob.location
+		name_to_rot[ob.name] = ob.rotation_quaternion.inverted()
 		# 4KEX: Convert rotation euler from radians to degrees
 		name_to_rot[ob.name][0] = name_to_rot[ob.name][0] * 180.0 / math.pi
 		name_to_rot[ob.name][1] = name_to_rot[ob.name][1] * 180.0 / math.pi
@@ -1180,7 +1162,6 @@ def save_3ds(exportOptions, filename):
 		filename += '.3ds'
 
 	time1= time.time()
-	bpy.context.window.cursor_set('WAIT')
 
 	sce = bpy.context.scene
 
@@ -1200,15 +1181,16 @@ def save_3ds(exportOptions, filename):
 	kfdata = make_kfdata()
 
 	# Get all the supported objects selected in this scene:
-	ob_sel= sce.objects
+	ob_sel= [ob for ob in sce.objects if ob.type == 'MESH' ]
 	for ob in ob_sel:
 		if ob.name.upper() == '~CS_GLOBALOPTIONS':
 			ob_sel.remove(ob)
 			CS_GLOBALOPTIONS_OBJ = ob
 			break
 
-	mesh_objects = [ ob for ob in bpy.data.meshes if ob.name in bpy.data.objects]
-	empty_objects = [ ob for ob in ob_sel if ob.type == 'EMPTY' ]
+	#mesh_objects = [ (ob, me) for ob in ob_sel for me in (ob.to_mesh(sce,True,'PREVIEW',False),) if me ]
+	mesh_objects = [ (ob, ob.to_mesh(sce,True,'RENDER',True,False)) for ob in ob_sel  ]
+	empty_objects = [ (ob,None) for ob in ob_sel if ob.type == 'EMPTY' ]
 
 	# Make a list of all materials used in the selected meshes (use a dictionary,
 	# each material is added once):
@@ -1217,17 +1199,15 @@ def save_3ds(exportOptions, filename):
 	# The original code iterated over all objects, inspecting them
 	# and depending if they were meshes building the material dictionary
 	# Now we iterate directly over meshes and their materials
-	for ob in mesh_objects:
-		for mat in ob.materials:
-			for tex in mat.texture_slots:
-				if tex:
-					materialDict.setdefault( (mat.name,tex.texture.image.name) ,(mat,tex.texture.image ))
-				else:
-					materialDict.setdefault( (mat.name,None) ,(mat, None ))
-
-	# Make material chunks for all materials used in the meshes:
-	for mat_and_image in materialDict.values():
-		object_info.add_subchunk(make_material_chunk(mat_and_image[0], mat_and_image[1]))
+	for  mat in bpy.data.materials:
+		for tex in mat.texture_slots:
+			img = None
+			if tex and hasattr(tex.texture,'image'):
+				img = tex.texture.image
+			if img:
+				materialDict.setdefault( (mat.name,tex.texture.image.name) ,(mat,tex.texture.image ))
+			else:
+				materialDict.setdefault( (mat.name,None) ,(mat, None ))
 
 	# 4KEX: Added MASTERSCALE element
 	mscale = _3ds_chunk(MASTERSCALE)
@@ -1244,20 +1224,22 @@ def save_3ds(exportOptions, filename):
 
 	# Create object chunks for all meshes:
 	i = 0
-	for mesh in mesh_objects:
+	for ob, blender_mesh in mesh_objects:
 		# create a new object chunk
 		object_chunk = _3ds_chunk(OBJECT)
 
 		# set the object name
-		object_chunk.add_variable("name", _3ds_string(sane_name(mesh.name, "object", False)))
+		object_chunk.add_variable("name", _3ds_string(sane_name(ob.name, "object", False)))
 
 		# make a mesh chunk out of the mesh:
-		object_chunk.add_subchunk(make_mesh_chunk(mesh, materialDict, ob, name_to_id, name_to_scale, name_to_pos, name_to_rot))
+		mesh_chunk = make_mesh_chunk(blender_mesh, materialDict, ob, name_to_id, name_to_scale, name_to_pos, name_to_rot)
+#		mesh_chunk.dump()
+#		print("Created mesh chunk for {0} with {1} subchunks, size {2}".format(ob.name,len(mesh_chunk.subchunks), mesh_chunk.get_size()) )
+		object_chunk.add_subchunk(mesh_chunk)
 		object_info.add_subchunk(object_chunk)
 
 		# 4KEX: export kfdata node
-		kfdata.add_subchunk(make_kf_obj_node(mesh, name_to_id, name_to_scale, name_to_pos, name_to_rot))
-		blender_mesh.verts = None
+		kfdata.add_subchunk(make_kf_obj_node(ob, name_to_id, name_to_scale, name_to_pos, name_to_rot))
 		i+=i
 
 	# Create chunks for all empties:
@@ -1268,6 +1250,14 @@ def save_3ds(exportOptions, filename):
 
 	# Add main object info chunk to primary chunk:
 	primary.add_subchunk(object_info)
+
+	# Make material chunks for all materials used in the meshes:
+#	print("----- Material Dict -----")
+#	print(materialDict.values())
+	for mat_and_image in materialDict.values():
+		material_chunk = make_material_chunk(mat_and_image[0], mat_and_image[1])
+#		material_chunk.dump()
+		object_info.add_subchunk(material_chunk)
 
 	# 4KEX: Export kfdata
 	primary.add_subchunk(kfdata)
@@ -1312,12 +1302,10 @@ def save_3ds(exportOptions, filename):
 		os.system(cmd_line)
 
 	# Debugging only: report the exporting time:
-	bpy.context.window.cursor_set('DEFAULT')
 	print( "3ds export time: %.2f" % (time.time() - time1) )
 
 	# Debugging only: dump the chunk hierarchy:
 	#primary.dump()
-
 
 if __name__=='__main__':
     try:
@@ -1325,11 +1313,11 @@ if __name__=='__main__':
     except:
         pass    
     register()
-    OBJECT_OT_kex_export.filepath = 'test'
-    OBJECT_OT_kex_export.kexfile = ''
-    OBJECT_OT_kex_export.enablekex = False
+#    OBJECT_OT_kex_export.filepath = 'E:\\RealFlight\\test'
+#    OBJECT_OT_kex_export.kexfile = ''
+#    OBJECT_OT_kex_export.enablekex = False
     
-    OBJECT_OT_kex_export.enablesup = False
-    OBJECT_OT_kex_export.enablebeta = False
-    save_3ds(OBJECT_OT_kex_export, OBJECT_OT_kex_export.filepath )
+#    OBJECT_OT_kex_export.enablesup = False
+#    OBJECT_OT_kex_export.enablebeta = False
+#    save_3ds(OBJECT_OT_kex_export, OBJECT_OT_kex_export.filepath )
 # save_3ds( '/test_b.3ds' )
