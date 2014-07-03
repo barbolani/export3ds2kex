@@ -823,6 +823,14 @@ def GetRealLocalMatrix(obj):
 
 	return m
 
+def strMatrix(matrix):
+	r = ''
+	for v in matrix:
+		for c in v:
+			r += ("%f" % c) + ' '
+		r += '\n'
+	return r
+
 def make_mesh_chunk(mesh, materialDict,ob, name_to_id, name_to_scale, name_to_pos, name_to_rot):
 	"""Make a chunk out of a Blender mesh."""
 
@@ -851,17 +859,35 @@ def make_mesh_chunk(mesh, materialDict,ob, name_to_id, name_to_scale, name_to_po
 	mesh1 = _3ds_chunk(OBJECT_TRANS_MATRIX)
 
 	# 4KEX: 3DS mesh matrix. Apply the worldspace scale and positioning relative to the parent (if any).
-	if (ob.parent == None) or (ob.parent.name not in name_to_id):
-		matrix_pos = (-name_to_pos[ob.name][0],-name_to_pos[ob.name][1],-name_to_pos[ob.name][2])
-	else:
-		matrix_pos = mathutils.Vector((name_to_pos[ob.parent.name][0]-name_to_pos[ob.name][0],name_to_pos[ob.parent.name][1]-name_to_pos[ob.name][1],name_to_pos[ob.parent.name][2]-name_to_pos[ob.name][2] ))*name_to_rot[ob.parent.name].to_matrix()
+#	if (ob.parent == None) or (ob.parent.name not in name_to_id):
+#		matrix_pos =mathutils.Vector( (-name_to_pos[ob.name][0],-name_to_pos[ob.name][1],-name_to_pos[ob.name][2]))*name_to_rot[ob.name].to_matrix()
+#	else:
+#		matrix_pos = mathutils.Vector((name_to_pos[ob.parent.name][0]-name_to_pos[ob.name][0],name_to_pos[ob.parent.name][1]-name_to_pos[ob.name][1],name_to_pos[ob.parent.name][2]-name_to_pos[ob.name][2] ))*name_to_rot[ob.parent.name].to_matrix()
+#	ob_matrix = mathutils.Matrix().Identity(4)
+#	ob_matrix[0][0] = 1.0/name_to_scale[ob.name][0]
+#	ob_matrix[1][1] = 1.0/name_to_scale[ob.name][1]
+#	ob_matrix[2][2] = 1.0/name_to_scale[ob.name][2]
+#	ob_matrix[3][0] = matrix_pos[0]/name_to_scale[ob.name][0]
+#	ob_matrix[3][1] = matrix_pos[1]/name_to_scale[ob.name][1]
+#	ob_matrix[3][2] = matrix_pos[2]/name_to_scale[ob.name][2]
+
+	scale_matrix = mathutils.Matrix().Identity(4)
+	offset_matrix = mathutils.Matrix().Identity(4)		
+	rot_matrix = mathutils.Matrix().Identity(4)		
+
+	for i in range(0,2):
+		offset_matrix[3][i] = ob.matrix_world.to_translation()[i]
+		if (ob.parent != None) and (ob.parent.name not in name_to_id):
+			offset_matrix[3][i] += name_to_pos[ob.parent.name][i]
+
 	ob_matrix = mathutils.Matrix().Identity(4)
-	ob_matrix[0][0] = 1.0/name_to_scale[ob.name][0]
-	ob_matrix[1][1] = 1.0/name_to_scale[ob.name][1]
-	ob_matrix[2][2] = 1.0/name_to_scale[ob.name][2]
-	ob_matrix[3][0] = matrix_pos[0]/name_to_scale[ob.name][0]
-	ob_matrix[3][1] = matrix_pos[1]/name_to_scale[ob.name][1]
-	ob_matrix[3][2] = matrix_pos[2]/name_to_scale[ob.name][2]
+
+	ob_matrix[3][0] = -ob.matrix_local.to_translation()[0]
+	ob_matrix[3][1] = -ob.matrix_local.to_translation()[1]
+	ob_matrix[3][2] = -ob.matrix_local.to_translation()[2]
+
+	print("Matrix for " + ob.name + " that has " + ("no parent" if ob.parent == None else ob.parent.name + " as parent"))
+	print( strMatrix(ob_matrix) )
 
 	mesh1.add_variable("w1", _3ds_float(ob_matrix[0][0]))
 	mesh1.add_variable("w2", _3ds_float(ob_matrix[0][1]))
@@ -926,22 +952,16 @@ def make_track_chunk(ID, obj, obj_size, obj_pos, obj_rot):
 	# 4KEX: New method simply inserts the parameter pos/rotation/scale
 	if ID==POS_TRACK_TAG:
 		# position vector:
+		print("%s POSITION: %f %f %f\n" % (obj.name,obj_pos[0], obj_pos[1], obj_pos[2]) )
 		track_chunk.add_variable("position", _3ds_point_3d(obj_pos))
 	elif ID==ROT_TRACK_TAG:
 		# rotation (quaternion, angle first [in radians], followed by axis):
-		track_chunk.add_variable("rotation", _3ds_point_4d((obj_rot.angle * math.pi / 180.0, obj_rot.axis[0], obj_rot.axis[1], obj_rot.axis[2])))
+		print("%s ROTATION: Angle %f Axis %f %f %f\n" % (obj.name, obj_rot.angle, obj_rot.axis[0], obj_rot.axis[1], obj_rot.axis[2]) )
+		track_chunk.add_variable("rotation", _3ds_point_4d((obj_rot.angle, obj_rot.axis[0], obj_rot.axis[1], obj_rot.axis[2])))
 	elif ID==SCL_TRACK_TAG:
 		# scale vector:
+		print("%s SCALE: %f %f %f\n" % (obj.name,obj_size[0], obj_size[1], obj_size[2]) )
 		track_chunk.add_variable("scale", _3ds_point_3d(obj_size))
-
-
-
-	'''
-	# 4KEX: Eventually add bounding box. So far has not caused any problems.
-	bb = _3ds_chunk(BOUNDBOX)
-	bb.add_variable("minx",
-	'''
-
 
 	return track_chunk
 
@@ -989,10 +1009,11 @@ def make_kf_obj_node(obj, name_to_id, name_to_scale, name_to_pos, name_to_rot):
 	kf_obj_node.add_subchunk(obj_node_header_chunk)
 
 	# 4KEX: Add a pivot point at the object centre
-	if (parent == None) or (parent.name not in name_to_id):
-		pivot_pos = (name_to_pos[name][0],name_to_pos[name][1],name_to_pos[name][2])
-	else:
-		pivot_pos = mathutils.Vector(((name_to_pos[name][0]-name_to_pos[parent.name][0]),(name_to_pos[name][1]-name_to_pos[parent.name][1]),(name_to_pos[name][2]-name_to_pos[parent.name][2]))) * name_to_rot[parent.name].to_matrix()
+	#if (parent == None) or (parent.name not in name_to_id):
+	pivot_pos = obj.matrix_local.to_translation()
+	#else:
+	#	pivot_pos = name_to_pos[name]-name_to_pos[parent.name]
+		
 	obj_pivot_chunk = _3ds_chunk(OBJECT_PIVOT)
 	obj_pivot_chunk.add_variable("pivot", _3ds_point_3d(pivot_pos))
 	kf_obj_node.add_subchunk(obj_pivot_chunk)
@@ -1006,14 +1027,15 @@ def make_kf_obj_node(obj, name_to_id, name_to_scale, name_to_pos, name_to_rot):
 	# Add track chunks for position, rotation and scale:
 	# 4KEX: Compute the position and rotation of the object centre
 	# 4KEX: The mesh has already been positioned around the object centre and scaled appropriately
-	if (parent == None) or (parent.name not in name_to_id):
-		obj_size = (1.0,1.0,1.0)
-		obj_pos = name_to_pos[name]
-		obj_rot = name_to_rot[name]
-	else:
-		obj_size = (1.0,1.0,1.0)
-		obj_pos = mathutils.Vector(((name_to_pos[name][0]-name_to_pos[parent.name][0]),(name_to_pos[name][1]-name_to_pos[parent.name][1]),(name_to_pos[name][2]-name_to_pos[parent.name][2]))) * name_to_rot[parent.name].to_matrix()
-		obj_rot = name_to_rot[name] * name_to_rot[parent.name].inverted() 
+	# if (parent == None) or (parent.name not in name_to_id):
+	obj_size = obj.matrix_local.to_scale()
+	obj_pos = obj.matrix_local.to_translation()
+	obj_rot = obj.matrix_local.to_euler().to_quaternion()
+	#else:
+	#	ml = obj.matrix_local
+	#	obj_rot = mathutils.Quaternion( (0.0,0.0,0.0), 0 ) # ml.to_quaternion().inverted()
+	#	obj_size = (1,1,1)
+	#	obj_pos = -name_to_pos[parent.name] + name_to_pos[name]
 
 	kf_obj_node.add_subchunk(make_track_chunk(SCL_TRACK_TAG, obj, obj_size, obj_pos, obj_rot))
 	kf_obj_node.add_subchunk(make_track_chunk(ROT_TRACK_TAG, obj, obj_size, obj_pos, obj_rot))
@@ -1141,13 +1163,14 @@ def write_sup( file, ob, isEmpty ):
 def append_to_name_to(objects,name_to_id,name_to_scale,name_to_pos,name_to_rot):
 	for ob,something in objects:
 		name_to_id[ob.name]= len(name_to_id)
-		name_to_scale[ob.name] = ob.dimensions
-		name_to_pos[ob.name] = ob.location
-		name_to_rot[ob.name] = ob.rotation_quaternion.inverted()
+		name_to_scale[ob.name] = ob.scale.copy()
+		name_to_pos[ob.name] = ob.location.copy()
+		name_to_rot[ob.name] = ob.rotation_euler.copy()
 		# 4KEX: Convert rotation euler from radians to degrees
-		name_to_rot[ob.name][0] = name_to_rot[ob.name][0] * 180.0 / math.pi
-		name_to_rot[ob.name][1] = name_to_rot[ob.name][1] * 180.0 / math.pi
-		name_to_rot[ob.name][2] = name_to_rot[ob.name][2] * 180.0 / math.pi
+		#name_to_rot[ob.name][0] = name_to_rot[ob.name][0] * 180.0 / math.pi
+		#name_to_rot[ob.name][1] = name_to_rot[ob.name][1] * 180.0 / math.pi
+		#name_to_rot[ob.name][2] = name_to_rot[ob.name][2] * 180.0 / math.pi
+		name_to_rot[ob.name] =  name_to_rot[ob.name].to_quaternion().inverted()
 
 def save_3ds(exportOptions, filename):
 	global CS_GLOBALOPTIONS_OBJ
@@ -1193,7 +1216,7 @@ def save_3ds(exportOptions, filename):
 	materialDict = dict()
 	
 	# The original code iterated over all objects, inspecting them
-	# and depending if they were meshes building the material dictionary
+	# and depending if they were mesheszs building the material dictionary
 	# Now we iterate directly over meshes and their materials
 	for  mat in bpy.data.materials:
 		for tex in mat.texture_slots:
@@ -1304,11 +1327,11 @@ if __name__=='__main__':
     except:
         pass    
     register()
-#    OBJECT_OT_kex_export.filepath = 'E:\\RealFlight\\test'
-#    OBJECT_OT_kex_export.kexfile = ''
-#    OBJECT_OT_kex_export.enablekex = False
+    OBJECT_OT_kex_export.filepath = 'E:\\RF\\test'
+    OBJECT_OT_kex_export.kexfile = 'E:\\RF\\3ds2kex.exe'
+    OBJECT_OT_kex_export.enablekex = True
     
-#    OBJECT_OT_kex_export.enablesup = False
-#    OBJECT_OT_kex_export.enablebeta = False
-#    save_3ds(OBJECT_OT_kex_export, OBJECT_OT_kex_export.filepath )
+    OBJECT_OT_kex_export.enablesup = False
+    OBJECT_OT_kex_export.enablebeta = False
+    save_3ds(OBJECT_OT_kex_export, OBJECT_OT_kex_export.filepath )
 # save_3ds( '/test_b.3ds' )
