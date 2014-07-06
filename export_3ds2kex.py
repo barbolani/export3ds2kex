@@ -871,20 +871,18 @@ def make_mesh_chunk(mesh, materialDict,ob, name_to_id, name_to_scale, name_to_po
 #	ob_matrix[3][1] = matrix_pos[1]/name_to_scale[ob.name][1]
 #	ob_matrix[3][2] = matrix_pos[2]/name_to_scale[ob.name][2]
 
-	scale_matrix = mathutils.Matrix().Identity(4)
-	offset_matrix = mathutils.Matrix().Identity(4)		
-	rot_matrix = mathutils.Matrix().Identity(4)		
-
-	for i in range(0,2):
-		offset_matrix[3][i] = ob.matrix_world.to_translation()[i]
-		if (ob.parent != None) and (ob.parent.name not in name_to_id):
-			offset_matrix[3][i] += name_to_pos[ob.parent.name][i]
+	scale_vector = ob.matrix_local.to_scale()
+	offset_vector = ob.matrix_local.to_translation()
 
 	ob_matrix = mathutils.Matrix().Identity(4)
 
-	ob_matrix[3][0] = -ob.matrix_local.to_translation()[0]
-	ob_matrix[3][1] = -ob.matrix_local.to_translation()[1]
-	ob_matrix[3][2] = -ob.matrix_local.to_translation()[2]
+	ob_matrix[0][0] = 1/scale_vector[0]
+	ob_matrix[1][1] = 1/scale_vector[1]
+	ob_matrix[2][2] = 1/scale_vector[2]
+
+	ob_matrix[3][0] = -offset_vector[0]/scale_vector[0]
+	ob_matrix[3][1] = -offset_vector[1]/scale_vector[1]
+	ob_matrix[3][2] = -offset_vector[2]/scale_vector[2]
 
 	print("Matrix for " + ob.name + " that has " + ("no parent" if ob.parent == None else ob.parent.name + " as parent"))
 	print( strMatrix(ob_matrix) )
@@ -1028,7 +1026,8 @@ def make_kf_obj_node(obj, name_to_id, name_to_scale, name_to_pos, name_to_rot):
 	# 4KEX: Compute the position and rotation of the object centre
 	# 4KEX: The mesh has already been positioned around the object centre and scaled appropriately
 	# if (parent == None) or (parent.name not in name_to_id):
-	obj_size = obj.matrix_local.to_scale()
+	#obj_size = obj.matrix_local.to_scale()
+	obj_size = (1,1,1)
 	obj_pos = obj.matrix_local.to_translation()
 	obj_rot = obj.matrix_local.to_euler().to_quaternion()
 	#else:
