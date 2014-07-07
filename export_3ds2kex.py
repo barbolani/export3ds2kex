@@ -802,27 +802,6 @@ def make_uv_chunk(uv_array):
 	uv_chunk.add_variable("uv coords", uv_array)
 	return uv_chunk
 
-# Retrieve the true local matrix of the object
-# Must get parent's worldspace and object
-# worldspace and compute the difference
-# NOTE: The localspace matrix returned natively
-#       does not return what is expected so
-#       this workaround method should be used
-def GetRealLocalMatrix(obj):
-	m = Blender.Mathutils.Matrix().identity()
-
-	if not obj:
-		return m
-
-	m = obj.getMatrix('worldspace').copy()
-	p = obj
-	if p.getParent():
-		p = p.getParent()
-		invParent = p.getMatrix('worldspace').copy().invert()
-		m = m*invParent
-
-	return m
-
 def strMatrix(matrix):
 	r = ''
 	for v in matrix:
@@ -831,7 +810,7 @@ def strMatrix(matrix):
 		r += '\n'
 	return r
 
-def make_mesh_chunk(mesh, materialDict,ob, name_to_id, name_to_scale, name_to_pos, name_to_rot):
+def make_mesh_chunk(mesh, materialDict,ob, name_to_id):
 	"""Make a chunk out of a Blender mesh."""
 
     # Extract the triangles from the mesh:
@@ -858,24 +837,11 @@ def make_mesh_chunk(mesh, materialDict,ob, name_to_id, name_to_scale, name_to_po
 
 	mesh1 = _3ds_chunk(OBJECT_TRANS_MATRIX)
 
-	# 4KEX: 3DS mesh matrix. Apply the worldspace scale and positioning relative to the parent (if any).
-#	if (ob.parent == None) or (ob.parent.name not in name_to_id):
-#		matrix_pos =mathutils.Vector( (-name_to_pos[ob.name][0],-name_to_pos[ob.name][1],-name_to_pos[ob.name][2]))*name_to_rot[ob.name].to_matrix()
-#	else:
-#		matrix_pos = mathutils.Vector((name_to_pos[ob.parent.name][0]-name_to_pos[ob.name][0],name_to_pos[ob.parent.name][1]-name_to_pos[ob.name][1],name_to_pos[ob.parent.name][2]-name_to_pos[ob.name][2] ))*name_to_rot[ob.parent.name].to_matrix()
-#	ob_matrix = mathutils.Matrix().Identity(4)
-#	ob_matrix[0][0] = 1.0/name_to_scale[ob.name][0]
-#	ob_matrix[1][1] = 1.0/name_to_scale[ob.name][1]
-#	ob_matrix[2][2] = 1.0/name_to_scale[ob.name][2]
-#	ob_matrix[3][0] = matrix_pos[0]/name_to_scale[ob.name][0]
-#	ob_matrix[3][1] = matrix_pos[1]/name_to_scale[ob.name][1]
-#	ob_matrix[3][2] = matrix_pos[2]/name_to_scale[ob.name][2]
-
-	scale_vector = ob.matrix_local.to_scale()
+	scale_vector = ob.matrix_world.to_scale()
 	offset_vector = ob.matrix_local.to_translation()
-
+	
 	ob_matrix = mathutils.Matrix().Identity(4)
-
+	
 	ob_matrix[0][0] = 1/scale_vector[0]
 	ob_matrix[1][1] = 1/scale_vector[1]
 	ob_matrix[2][2] = 1/scale_vector[2]
@@ -934,7 +900,7 @@ def make_kfdata(start=0, stop=0, curtime=0):
 	return kfdata
 
 
-def make_track_chunk(ID, obj, obj_size, obj_pos, obj_rot):
+def make_track_chunk(obj, ID, var_name, var_value):
 	'''Make a chunk for track data.
 
 	Depending on the ID, this will construct a position, rotation or scale track.'''
@@ -947,23 +913,11 @@ def make_track_chunk(ID, obj, obj_size, obj_pos, obj_rot):
 	track_chunk.add_variable("tcb_frame", _3ds_int(0))
 	track_chunk.add_variable("tcb_flags", _3ds_short())
 
-	# 4KEX: New method simply inserts the parameter pos/rotation/scale
-	if ID==POS_TRACK_TAG:
-		# position vector:
-		print("%s POSITION: %f %f %f\n" % (obj.name,obj_pos[0], obj_pos[1], obj_pos[2]) )
-		track_chunk.add_variable("position", _3ds_point_3d(obj_pos))
-	elif ID==ROT_TRACK_TAG:
-		# rotation (quaternion, angle first [in radians], followed by axis):
-		print("%s ROTATION: Angle %f Axis %f %f %f\n" % (obj.name, obj_rot.angle, obj_rot.axis[0], obj_rot.axis[1], obj_rot.axis[2]) )
-		track_chunk.add_variable("rotation", _3ds_point_4d((obj_rot.angle, obj_rot.axis[0], obj_rot.axis[1], obj_rot.axis[2])))
-	elif ID==SCL_TRACK_TAG:
-		# scale vector:
-		print("%s SCALE: %f %f %f\n" % (obj.name,obj_size[0], obj_size[1], obj_size[2]) )
-		track_chunk.add_variable("scale", _3ds_point_3d(obj_size))
+	track_chunk.add_variable(var_name,var_value)
 
 	return track_chunk
 
-def make_kf_obj_node(obj, name_to_id, name_to_scale, name_to_pos, name_to_rot):
+def make_kf_obj_node(obj, name_to_id):
 	'''Make a node chunk for a Blender object.
 
 	Takes the Blender object as a parameter. Object id's are taken from the dictionary name_to_id.
@@ -1007,10 +961,7 @@ def make_kf_obj_node(obj, name_to_id, name_to_scale, name_to_pos, name_to_rot):
 	kf_obj_node.add_subchunk(obj_node_header_chunk)
 
 	# 4KEX: Add a pivot point at the object centre
-	#if (parent == None) or (parent.name not in name_to_id):
 	pivot_pos = obj.matrix_local.to_translation()
-	#else:
-	#	pivot_pos = name_to_pos[name]-name_to_pos[parent.name]
 		
 	obj_pivot_chunk = _3ds_chunk(OBJECT_PIVOT)
 	obj_pivot_chunk.add_variable("pivot", _3ds_point_3d(pivot_pos))
@@ -1025,20 +976,20 @@ def make_kf_obj_node(obj, name_to_id, name_to_scale, name_to_pos, name_to_rot):
 	# Add track chunks for position, rotation and scale:
 	# 4KEX: Compute the position and rotation of the object centre
 	# 4KEX: The mesh has already been positioned around the object centre and scaled appropriately
-	# if (parent == None) or (parent.name not in name_to_id):
-	#obj_size = obj.matrix_local.to_scale()
-	obj_size = (1,1,1)
 	obj_pos = obj.matrix_local.to_translation()
-	obj_rot = obj.matrix_local.to_euler().to_quaternion()
-	#else:
-	#	ml = obj.matrix_local
-	#	obj_rot = mathutils.Quaternion( (0.0,0.0,0.0), 0 ) # ml.to_quaternion().inverted()
-	#	obj_size = (1,1,1)
-	#	obj_pos = -name_to_pos[parent.name] + name_to_pos[name]
+	obj_rot = obj.matrix_local.to_euler().to_quaternion().inverted()
+	obj_scale = mathutils.Vector((1.0,1.0,1.0)) 
+	if obj.parent != None:
+		a = obj
+		while a.parent != None:
+			obj_rot.rotate( a.parent.matrix_parent_inverse.to_euler().to_quaternion().inverted())
+			a = a.parent
+		acc_pos = obj.parent.matrix_parent_inverse
+		obj_pos = acc_pos * obj.matrix_world.to_translation()
 
-	kf_obj_node.add_subchunk(make_track_chunk(SCL_TRACK_TAG, obj, obj_size, obj_pos, obj_rot))
-	kf_obj_node.add_subchunk(make_track_chunk(ROT_TRACK_TAG, obj, obj_size, obj_pos, obj_rot))
-	kf_obj_node.add_subchunk(make_track_chunk(POS_TRACK_TAG, obj, obj_size, obj_pos, obj_rot))
+	kf_obj_node.add_subchunk(make_track_chunk(obj, SCL_TRACK_TAG, "scale",_3ds_point_3d(obj_scale)))
+	kf_obj_node.add_subchunk(make_track_chunk(obj, ROT_TRACK_TAG, "rotation",_3ds_point_4d((obj_rot.angle, obj_rot.axis[0], obj_rot.axis[1], obj_rot.axis[2]))))
+	kf_obj_node.add_subchunk(make_track_chunk(obj, POS_TRACK_TAG, "position",_3ds_point_3d(obj_pos)))
 
 	return kf_obj_node
 
@@ -1159,17 +1110,9 @@ def write_sup( file, ob, isEmpty ):
 
 	file.write( '\r\n' )
 
-def append_to_name_to(objects,name_to_id,name_to_scale,name_to_pos,name_to_rot):
+def append_to_name_to(objects,name_to_id):
 	for ob,something in objects:
 		name_to_id[ob.name]= len(name_to_id)
-		name_to_scale[ob.name] = ob.scale.copy()
-		name_to_pos[ob.name] = ob.location.copy()
-		name_to_rot[ob.name] = ob.rotation_euler.copy()
-		# 4KEX: Convert rotation euler from radians to degrees
-		#name_to_rot[ob.name][0] = name_to_rot[ob.name][0] * 180.0 / math.pi
-		#name_to_rot[ob.name][1] = name_to_rot[ob.name][1] * 180.0 / math.pi
-		#name_to_rot[ob.name][2] = name_to_rot[ob.name][2] * 180.0 / math.pi
-		name_to_rot[ob.name] =  name_to_rot[ob.name].to_quaternion().inverted()
 
 def save_3ds(exportOptions, filename):
 	global CS_GLOBALOPTIONS_OBJ
@@ -1234,11 +1177,8 @@ def save_3ds(exportOptions, filename):
 
 	# Give all objects a unique ID and build a dictionary from object name to object id:
 	name_to_id = {}
-	name_to_scale = {}
-	name_to_pos = {}
-	name_to_rot = {}
-	append_to_name_to(mesh_objects,name_to_id,name_to_scale,name_to_pos,name_to_rot)
-	append_to_name_to(empty_objects,name_to_id,name_to_scale,name_to_pos,name_to_rot)
+	append_to_name_to(mesh_objects,name_to_id)
+	append_to_name_to(empty_objects,name_to_id)
 
 	# Create object chunks for all meshes:
 	i = 0
@@ -1250,19 +1190,19 @@ def save_3ds(exportOptions, filename):
 		object_chunk.add_variable("name", _3ds_string(sane_name(ob.name, "object", False)))
 
 		# make a mesh chunk out of the mesh:
-		mesh_chunk = make_mesh_chunk(blender_mesh, materialDict, ob, name_to_id, name_to_scale, name_to_pos, name_to_rot)
+		mesh_chunk = make_mesh_chunk(blender_mesh, materialDict, ob, name_to_id)
 		object_chunk.add_subchunk(mesh_chunk)
 		object_info.add_subchunk(object_chunk)
 
 		# 4KEX: export kfdata node
-		kfdata.add_subchunk(make_kf_obj_node(ob, name_to_id, name_to_scale, name_to_pos, name_to_rot))
+		kfdata.add_subchunk(make_kf_obj_node(ob, name_to_id))
 		i+=i
 
 	# Create chunks for all empties:
 	# 4KEX: Re-enabled kfdata. Empty objects not tested yet.
 	for ob in empty_objects:
 		# Empties only require a kf object node:
-		kfdata.add_subchunk(make_kf_obj_node(ob, name_to_id, name_to_scale, name_to_pos, name_to_rot))
+		kfdata.add_subchunk(make_kf_obj_node(ob, name_to_id))
 
 	# Add main object info chunk to primary chunk:
 	primary.add_subchunk(object_info)
