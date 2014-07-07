@@ -1142,7 +1142,7 @@ def save_3ds(exportOptions, filename):
 	kfdata = make_kfdata()
 
 	# Get all the supported objects selected in this scene:
-	ob_sel= [ob for ob in sce.objects if ob.type == 'MESH' ]
+	ob_sel= [ob for ob in sce.objects if ob.type == 'MESH' or ob.type == 'CURVE' ]
 	for ob in ob_sel:
 		if ob.name.upper() == '~CS_GLOBALOPTIONS':
 			ob_sel.remove(ob)
