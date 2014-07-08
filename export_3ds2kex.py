@@ -982,7 +982,7 @@ def make_kf_obj_node(obj, name_to_id):
 	if obj.parent != None:
 		a = obj
 		while a.parent != None:
-			obj_rot.rotate( a.parent.matrix_parent_inverse.to_euler().to_quaternion().inverted())
+			obj_rot.rotate( a.parent.matrix_parent_inverse.to_quaternion().inverted())
 			a = a.parent
 		acc_pos = obj.parent.matrix_parent_inverse
 		obj_pos = acc_pos * obj.matrix_world.to_translation()
